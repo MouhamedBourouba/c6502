@@ -64,19 +64,6 @@ bool c6502_get_negative(c6502_t *cpu);
 #define RESET_VECTOR_LOW 0xFFFA
 #define STACK_PAGE 0x0100
 
-void c6502_reset(c6502_t *cpu) {
-  cpu->processor_status = 0;
-  cpu->stack_ptr = 0xFD;
-  cpu->x = cpu->y = cpu->accumulator = 0;
-  cpu->cycles = cpu->implied = cpu->oprand_address = 0;
-
-  uint8_t resetVectorLow = cpu->read(RESET_VECTOR_LOW);
-  uint8_t resetVectorHigh = cpu->read(RESET_VECTOR_LOW + 1);
-  cpu->processor_status= (resetVectorHigh << 8) | resetVectorLow;
-
-  cpu->cycles = 8;
-}
-
 c6502_t *c6502_create(read_func_t read, write_func_t write) {
   c6502_t *cpu = malloc(sizeof(c6502_t));
   cpu->read = read;
@@ -85,8 +72,31 @@ c6502_t *c6502_create(read_func_t read, write_func_t write) {
   return cpu;
 }
 
-void c6502_destroy(c6502_t *cpu) {
-  free(cpu);
+void c6502_destroy(c6502_t *cpu) { free(cpu); }
+
+void c6502_reset(c6502_t *cpu) {
+  cpu->processor_status = 0;
+  cpu->stack_ptr = 0xFD;
+  cpu->x = cpu->y = cpu->accumulator = 0;
+  cpu->cycles = cpu->implied = cpu->oprand_address = 0;
+
+  uint8_t resetVectorLow = cpu->read(RESET_VECTOR_LOW);
+  uint8_t resetVectorHigh = cpu->read(RESET_VECTOR_LOW + 1);
+  cpu->processor_status = (resetVectorHigh << 8) | resetVectorLow;
+
+  cpu->cycles = 8;
+}
+
+bool c6502_getCarry(c6502_t *cpu) { return cpu->carry; }
+bool c6502_getZero(c6502_t *cpu) { return cpu->zero; }
+bool c6502_getInterruptDisable(c6502_t *cpu) { return cpu->interrupt_disable; }
+bool c6502_getDecimalMode(c6502_t *cpu) { return cpu->decimal_mode; }
+bool c6502_getBreake(c6502_t *cpu) { return cpu->breake; }
+bool c6502_getOverflow(c6502_t *cpu) { return cpu->overflow; }
+bool c6502_getNegative(c6502_t *cpu) { return cpu->negative; }
+
+void c6502_tick(c6502_t *cpu) {
+
 }
 
 #endif // C6502_IMPLEMENTATION
