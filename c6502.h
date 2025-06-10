@@ -3,7 +3,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 typedef uint8_t (*read_func_t)(uint16_t);
@@ -55,8 +54,12 @@ bool c6502_get_negative(c6502_t *cpu);
 
 // todo remove
 #define C6502_IMPLEMENTATION
+/// for develepment puprposes
 
 #ifdef C6502_IMPLEMENTATION
+
+// prevent multiple implimentaions
+#undef C6502_IMPLEMENTATION
 
 #define RESET_VECTOR_LOW 0xFFFA
 #define STACK_PAGE 0x0100
@@ -74,12 +77,16 @@ void c6502_reset(c6502_t *cpu) {
   cpu->cycles = 8;
 }
 
-c6502_t *Mos6502_create(read_func_t read, write_func_t write) {
+c6502_t *c6502_create(read_func_t read, write_func_t write) {
   c6502_t *cpu = malloc(sizeof(c6502_t));
   cpu->read = read;
   cpu->write = write;
   c6502_reset(cpu);
   return cpu;
+}
+
+void c6502_destroy(c6502_t *cpu) {
+  free(cpu);
 }
 
 #endif // C6502_IMPLEMENTATION
