@@ -5,7 +5,7 @@ static const uint32_t ticktable[256];
 static void (*optable[256])();
 static const uint32_t ticktable[256];
 
-#define COMBINE_BYTES(high, low) (((high) << 8) | (low));
+#define COMBINE_BYTES(high, low) (high << 8 | low);
 
 #define RESET_VECTOR_LOW 0xFFFA
 #define STACK_PAGE 0x0100
@@ -55,12 +55,12 @@ void c6502_reset() {
   state.x = state.y = state.accumulator = 0;
   state.cycles = state.oprand_address = 0;
 
-  uint8_t resetVectorLow = read6502(RESET_VECTOR_LOW);
-  uint8_t resetVectorHigh = read6502(RESET_VECTOR_LOW + 1);
+  uint8_t reset_vector_lo = read6502(RESET_VECTOR_LOW);
+  uint8_t reset_vector_hi = read6502(RESET_VECTOR_LOW + 1);
 
-  state.processor_status = COMBINE_BYTES(resetVectorHigh, resetVectorLow)
+  state.processor_status = COMBINE_BYTES(reset_vector_hi, reset_vector_lo);
 
-                               state.cycles = 8;
+  state.cycles = 8;
 }
 
 bool c6502_getCarry() { return state.carry; }
@@ -101,13 +101,19 @@ static void zpy() {
 
 static void rel() {
   state.relative_address = read_pc();
-  if(state.relative_address & 0x80) {
+  if (state.relative_address & 0x80) {
     state.relative_address |= 0xFF00;
   }
   return;
 }
 
-static void abso() {}
+static void abso() {
+  uint8_t lo = read_pc();
+  uint8_t hi = read_pc();
+
+  state.oprand_address = COMBINE_BYTES(hi, lo); 
+}
+
 static void absx() {}
 static void absy() {}
 static void bso() {}
