@@ -42,7 +42,7 @@ static struct {
   uint16_t oprand_address;
   uint16_t relative_address;
 
-  bool implied;
+  bool addr_plus_cycle, opcode_plus_cycle;
 
   unsigned num_of_instr;
 } state;
@@ -112,10 +112,35 @@ static void abso() {
   uint8_t hi = read_pc();
 
   state.oprand_address = COMBINE_BYTES(hi, lo); 
+  return;
 }
 
-static void absx() {}
-static void absy() {}
+static void absx() {
+  uint8_t lo = read_pc();
+  uint8_t hi = read_pc();
+
+  state.oprand_address = COMBINE_BYTES(hi, lo); 
+  state.oprand_address += state.x;
+
+  if(state.oprand_address >> 8 != hi) {
+    state.addr_plus_cycle = true;
+  }
+  return;
+}
+
+static void absy() {
+  uint8_t lo = read_pc();
+  uint8_t hi = read_pc();
+
+  state.oprand_address = COMBINE_BYTES(hi, lo); 
+  state.oprand_address += state.y;
+
+  if(state.oprand_address >> 8 != hi) {
+    state.addr_plus_cycle = true;
+  }
+  return;
+}
+
 static void bso() {}
 static void ind() {}
 static void indx() {}
