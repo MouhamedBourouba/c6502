@@ -72,20 +72,30 @@ bool c6502_getNegative() { return state.negative; }
 
 void c6502_tick() {}
 
-inline static uint16_t read_pc() {
-  return state.program_counter++;
-}
+inline static uint16_t read_pc() { return state.program_counter++; }
 
 // Addression modes
-static void imp() {}
-static void acc() {}
+static void imp() { return; }
+static void acc() { return; }
 
 static void imm() {
   state.oprand_address = read_pc();
+  return;
 }
 
 static void zp() {
   state.oprand_address = (uint16_t)read6502(read_pc());
+  return;
+}
+
+static void zpx() {
+  state.oprand_address = (uint16_t)(read6502(read_pc()) + state.x) & 0x00FF;
+  return;
+}
+
+static void zpy() {
+  state.oprand_address = (uint16_t)(read6502(read_pc()) + state.y) & 0x00FF;
+  return;
 }
 
 static void abso() {}
@@ -96,8 +106,6 @@ static void ind() {}
 static void indx() {}
 static void indy() {}
 static void rel() {}
-static void zpx() {}
-static void zpy() {}
 
 // Instructions
 static void adc() {}
