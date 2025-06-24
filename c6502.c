@@ -40,6 +40,7 @@ static struct {
   uint8_t opcode;
 
   uint16_t oprand_address;
+  uint16_t relative_address;
 
   bool implied;
 
@@ -98,6 +99,14 @@ static void zpy() {
   return;
 }
 
+static void rel() {
+  state.relative_address = read_pc();
+  if(state.relative_address & 0x80) {
+    state.relative_address |= 0xFF00;
+  }
+  return;
+}
+
 static void abso() {}
 static void absx() {}
 static void absy() {}
@@ -105,7 +114,6 @@ static void bso() {}
 static void ind() {}
 static void indx() {}
 static void indy() {}
-static void rel() {}
 
 // Instructions
 static void adc() {}
