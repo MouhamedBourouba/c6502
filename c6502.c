@@ -1,11 +1,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-static const uint32_t ticktable[256];
+static void (*addrtable[256])();
 static void (*optable[256])();
 static const uint32_t ticktable[256];
 
-#define COMBINE_BYTES(high, low) (high << 8 | low);
+#define COMBINE_BYTES(low, high) (((uint16_t)high) << 8 | (uint16_t)low)
 
 #define RESET_VECTOR_LOW 0xFFFA
 #define STACK_PAGE 0x0100
@@ -42,7 +42,7 @@ static struct {
   uint16_t oprand_address;
   uint16_t relative_address;
 
-  bool addr_plus_cycle, opcode_plus_cycle;
+  bool addr_panalty_cycle, opcode_panalty_cycle;
 
   unsigned num_of_instr;
 } state;
@@ -58,7 +58,7 @@ void c6502_reset() {
   uint8_t reset_vector_lo = read6502(RESET_VECTOR_LOW);
   uint8_t reset_vector_hi = read6502(RESET_VECTOR_LOW + 1);
 
-  state.processor_status = COMBINE_BYTES(reset_vector_hi, reset_vector_lo);
+  state.processor_status = COMBINE_BYTES(reset_vector_lo, reset_vector_hi);
 
   state.cycles = 8;
 }
@@ -114,7 +114,7 @@ static void abso() {
   uint8_t lo = read_pc();
   uint8_t hi = read_pc();
 
-  state.oprand_address = COMBINE_BYTES(hi, lo);
+  state.oprand_address = COMBINE_BYTES(lo, hi);
   return;
 }
 
@@ -122,11 +122,11 @@ static void absx() {
   uint8_t lo = read_pc();
   uint8_t hi = read_pc();
 
-  state.oprand_address = COMBINE_BYTES(hi, lo);
+  state.oprand_address = COMBINE_BYTES(lo, hi);
   state.oprand_address += state.x;
 
   if (state.oprand_address >> 8 != hi) {
-    state.addr_plus_cycle = true;
+    state.addr_panalty_cycle = true;
   }
   return;
 }
@@ -135,11 +135,11 @@ static void absy() {
   uint8_t lo = read_pc();
   uint8_t hi = read_pc();
 
-  state.oprand_address = COMBINE_BYTES(hi, lo);
+  state.oprand_address = COMBINE_BYTES(lo, hi);
   state.oprand_address += state.y;
 
   if (state.oprand_address >> 8 != hi) {
-    state.addr_plus_cycle = true;
+    state.addr_panalty_cycle = true;
   }
   return;
 }
