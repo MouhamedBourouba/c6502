@@ -148,106 +148,190 @@ static void ind() {
   uint8_t lo = read_pc();
   uint8_t hi = read_pc();
 
-  uint16_t pointer = COMBINE_BYTES(hi, lo);
+  uint16_t pointer = COMBINE_BYTES(lo, hi);
   uint8_t target_lo = read6502(pointer);
 
   uint16_t pointer_next = (pointer & 0xFF00) | ((pointer + 1) & 0x00FF);
   uint8_t target_hi = read6502(pointer_next);
 
-  state.oprand_address = COMBINE_BYTES(target_hi, target_lo);
+  state.oprand_address = COMBINE_BYTES(target_lo, target_hi);
   return;
 }
 
 static void indx() {
-  uint8_t lo = read_pc();
+  uint16_t base = (read_pc() + state.x) & 0x00FF;
 
-  uint16_t pointer = (lo + state.x) & 0x00FF;
-  uint8_t target_lo = read6502(pointer);
+  uint8_t target_lo = read6502(base);
 
-  uint16_t pointer_next = ((pointer + 1) & 0x00FF);
+  uint16_t pointer_next = ((base + 1) & 0x00FF);
   uint8_t target_hi = read6502(pointer_next);
 
-  state.oprand_address = COMBINE_BYTES(target_hi, target_lo);
+  state.oprand_address = COMBINE_BYTES(target_lo, target_hi);
   return;
 }
 
 static void indy() {
-  uint8_t lo = read_pc();
+  uint16_t base = read_pc() & 0x00FF;
 
-  uint16_t pointer = (lo + state.y) & 0x00FF;
-  uint8_t target_lo = read6502(pointer);
+  uint8_t target_lo = read6502(base);
+  uint8_t target_hi = read6502((base + 1) & 0x00FF);
 
-  uint16_t pointer_next = ((pointer + 1) & 0x00FF);
-  uint8_t target_hi = read6502(pointer_next);
+  uint16_t target = COMBINE_BYTES(target_lo, target_hi);
 
-  state.oprand_address = COMBINE_BYTES(target_hi, target_lo);
+  state.oprand_address = target + state.y;
+
+  if ((state.oprand_address & 0xFF00) != (target & 0xFF00)) {
+    state.addr_panalty_cycle = true;
+  }
   return;
+}
+
+static uint16_t getvalue() {
+  if (addrtable[state.opcode] == acc)
+    return ((uint16_t)state.accumulator);
+  else
+    return ((uint16_t)read6502(state.oprand_address));
+}
+
+static uint16_t getvalue16() {
+  return COMBINE_BYTES(read6502(state.oprand_address),
+                       read6502(state.oprand_address + 1));
+}
+
+static void putvalue(uint16_t value) {
+  if (addrtable[state.opcode] == acc)
+    state.accumulator = (uint8_t)(value & 0x00FF);
+  else
+    write6502(state.oprand_address, (value & 0x00FF));
 }
 
 // Instructions
 static void adc() {}
+
 static void and () {}
+
 static void asl() {}
+
 static void bcc() {}
+
 static void bcs() {}
+
 static void beq() {}
+
 static void bit() {}
+
 static void bmi() {}
+
 static void bne() {}
+
 static void bpl() {}
+
 static void brk() {}
+
 static void bvc() {}
+
 static void bvs() {}
+
 static void clc() {}
+
 static void cld() {}
+
 static void cli() {}
+
 static void clv() {}
+
 static void cmp() {}
+
 static void cpx() {}
+
 static void cpy() {}
+
 static void dcp() {}
+
 static void dec() {}
+
 static void dex() {}
+
 static void dey() {}
+
 static void eor() {}
+
 static void inc() {}
+
 static void inx() {}
+
 static void iny() {}
+
 static void isb() {}
+
 static void jmp() {}
+
 static void jsr() {}
+
 static void lax() {}
+
 static void lda() {}
+
 static void ldx() {}
+
 static void ldy() {}
+
 static void lsr() {}
+
 static void nop() {}
+
 static void ora() {}
+
 static void pha() {}
+
 static void php() {}
+
 static void pla() {}
+
 static void plp() {}
+
 static void rla() {}
+
 static void rol() {}
+
 static void ror() {}
+
 static void rra() {}
+
 static void rti() {}
+
 static void rts() {}
+
 static void sax() {}
+
 static void sbc() {}
+
 static void sec() {}
+
 static void sed() {}
+
 static void sei() {}
+
 static void slo() {}
+
 static void sre() {}
+
 static void sta() {}
+
 static void stx() {}
+
 static void sty() {}
+
 static void tax() {}
+
 static void tay() {}
+
 static void tsx() {}
+
 static void txa() {}
+
 static void txs() {}
+
 static void tya() {}
 
 // clang-format off
