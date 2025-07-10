@@ -1,19 +1,54 @@
+#include <cmath>
 #include <stdbool.h>
 #include <stdint.h>
 
-static void (*addrtable[256])();
-static void (*optable[256])();
-static const uint32_t ticktable[256];
+#define RESET_VECTOR_LOW 0xFFFA
+#define STACK_PAGE 0x0100
 
 #define COMBINE_BYTES(low, high) (((uint16_t)high) << 8 | (uint16_t)low)
 
-#define RESET_VECTOR_LOW 0xFFFA
-#define STACK_PAGE 0x0100
+#define ZEROCALC(n)                                                            \
+  {                                                                            \
+    if ((n) & 0x00FF)                                                          \
+      state.zero = false;                                                      \
+    else                                                                       \
+      state.zero = true;                                                       \
+  }
+
+#define SIGNCALC(n)                                                            \
+  {                                                                            \
+    if ((n) & 0x0080)                                                          \
+      state.negative = true;                                                   \
+    else                                                                       \
+      state.negative = false;                                                  \
+  }
+
+#define CARRYCALC(n)                                                           \
+  {                                                                            \
+    if ((n) & 0xFF00)                                                          \
+      state.carry = true;                                                      \
+    else                                                                       \
+      state.carry = false;                                                     \
+  }
+
+#define OVERFLOWCALC(n, m, o)                                                  \
+  { /* n = result, m = accumulator, o = memory */                              \
+    if (((n) ^ (uint16_t)(m)) & ((n) ^ (o)) & 0x0080)                          \
+      state.overflow = true;                                                   \
+    else                                                                       \
+      state.overflow = false;                                                  \
+  }
+
+#define SAVEACCUM(n) state.accumulator = (uint8_t)((n) & 0x00FF)
 
 // Forward decleration
 // The user of the libary the resposible for implementing those functions
 uint8_t read6502(uint16_t address);
 void write6502(uint16_t address, uint8_t value);
+
+static void (*addrtable[256])();
+static void (*optable[256])();
+static const uint32_t ticktable[256];
 
 static struct {
   uint8_t stack_ptr;
@@ -44,7 +79,7 @@ static struct {
 
   bool addr_panalty_cycle, opcode_panalty_cycle;
 
-  unsigned num_of_instr;
+  unsigned num_of_cyles;
 } state;
 
 void c6502_reset() {
@@ -71,10 +106,7 @@ bool c6502_getBreake() { return state.breake; }
 bool c6502_getOverflow() { return state.overflow; }
 bool c6502_getNegative() { return state.negative; }
 
-void c6502_tick() {
-  // remember to unset the plus cytle in the state and clear the state of any
-  // cycle spicifc data
-}
+void c6502_tick() {}
 
 inline static uint16_t read_pc() { return state.program_counter++; }
 
@@ -205,134 +237,516 @@ static void putvalue(uint16_t value) {
     write6502(state.oprand_address, (value & 0x00FF));
 }
 
+void push16(uint16_t pushval) {
+  write6502(STACK_PAGE + state.stack_ptr, (pushval >> 8) & 0xFF);
+  write6502(STACK_PAGE + ((state.stack_ptr - 1) & 0xFF), pushval & 0xFF);
+  state.stack_ptr -= 2;
+}
+
+void push8(uint8_t pushval) {
+  write6502(STACK_PAGE + state.stack_ptr--, pushval);
+}
+
+uint16_t pull16() {
+  uint16_t temp16;
+  temp16 =
+      read6502(STACK_PAGE + ((state.stack_ptr + 1) & 0xFF)) |
+      ((uint16_t)read6502(STACK_PAGE + ((state.stack_ptr + 2) & 0xFF)) << 8);
+  state.stack_ptr += 2;
+  return (temp16);
+}
+
+uint8_t pull8() { return (read6502(STACK_PAGE + ++state.stack_ptr)); }
+
+uint8_t value;
+uint8_t result;
+
 // Instructions
-static void adc() {}
+static void adc() {
+  state.opcode_panalty_cycle = 1;
+  value = getvalue();
+  result = (uint16_t)state.accumulator + value + (uint16_t)(state.carry);
 
-static void and () {}
+  CARRYCALC(result);
+  ZEROCALC(result);
+  OVERFLOWCALC(result, state.accumulator, value);
+  SIGNCALC(result);
 
-static void asl() {}
+#ifndef NES_CPU
+  if (state.decimal_mode) {
+    state.carry = false;
 
-static void bcc() {}
+    if ((state.accumulator & 0x0F) > 0x09) {
+      state.accumulator += 0x06;
+    }
+    if ((state.accumulator & 0xF0) > 0x90) {
+      state.accumulator += 0x60;
+      state.carry = true;
+    }
 
-static void bcs() {}
+    state.num_of_cyles++;
+  }
+#endif
 
-static void beq() {}
+  state.accumulator = result;
+  return;
+}
 
-static void bit() {}
+static void and () {
+  state.opcode_panalty_cycle = true;
 
-static void bmi() {}
+  value = getvalue();
+  result = (uint16_t)(state.accumulator) & value;
 
-static void bne() {}
+  SIGNCALC(result);
+  CARRYCALC(result);
 
-static void bpl() {}
+  SAVEACCUM(result);
+}
 
-static void brk() {}
+static void asl() {
+  value = getvalue();
+  result = value << 1;
 
-static void bvc() {}
+  SIGNCALC(result);
+  CARRYCALC(result);
+  ZEROCALC(result);
 
-static void bvs() {}
+  putvalue(result);
+}
 
-static void clc() {}
+static void bcc() {
+  if (state.carry == false) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
 
-static void cld() {}
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2;
+    else
+      state.cycles++;
+  }
+}
 
-static void cli() {}
+static void bcs() {
+  if (state.carry) {
+    uint16_t oldpc = state.program_counter;
 
-static void clv() {}
+    state.program_counter += state.relative_address;
 
-static void cmp() {}
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void cpx() {}
+static void beq() {
+  if (state.zero) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void cpy() {}
+static void bit() {
+  value = getvalue();
+  result = (uint16_t)state.accumulator & value;
 
-static void dcp() {}
+  ZEROCALC(result);
+  state.processor_status =
+      (state.processor_status & 0x3F) | (uint8_t)(value & 0xC0);
+}
 
-static void dec() {}
+static void bmi() {
+  if (state.negative) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void dex() {}
+static void bne() {
+  if (state.zero == false) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void dey() {}
+static void bpl() {
+  if (state.negative == false) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void eor() {}
+static void brk() {
+  state.program_counter++;
+  push16(state.program_counter);
+  uint16_t status =
+      state.processor_status | 0x10; // status wiht the breake setk
+  push8(status);
+  state.interrupt_disable = true;
+  state.program_counter =
+      (uint16_t)read6502(0xFFFE) | ((uint16_t)read6502(0xFFFF) << 8);
+}
 
-static void inc() {}
+static void bvc() {
+  if (state.overflow == false) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void inx() {}
+static void bvs() {
+  if (state.overflow == true) {
+    uint16_t oldpc = state.program_counter;
+    state.program_counter += state.relative_address;
+    if ((oldpc & 0xFF00) != (state.program_counter & 0xFF00))
+      state.cycles += 2; // check if jump crossed a page boundary
+    else
+      state.cycles++;
+  }
+}
 
-static void iny() {}
+static void clc() { state.carry = false; }
 
-static void isb() {}
+static void cld() { state.decimal_mode = false; }
 
-static void jmp() {}
+static void cli() { state.interrupt_disable = false; }
 
-static void jsr() {}
+static void clv() { state.overflow = false; }
 
-static void lax() {}
+static void cmp() {
+  state.opcode_panalty_cycle = true;
+  value = getvalue();
+  result = (uint16_t)state.accumulator - value;
 
-static void lda() {}
+  if (state.accumulator >= (uint8_t)(value & 0x00FF))
+    state.carry = true;
+  else
+    state.carry = false;
+  if (state.accumulator == (uint8_t)(value & 0x00FF))
+    state.zero = true;
+  else
+    state.zero = false;
 
-static void ldx() {}
+  SIGNCALC(result);
+}
 
-static void ldy() {}
+static void cpx() {
+  value = getvalue();
+  result = (uint16_t)state.x - value;
 
-static void lsr() {}
+  if (state.x >= (uint8_t)(value & 0x00FF))
+    state.carry = true;
+  else
+    state.carry = false;
+  if (state.x == (uint8_t)(value & 0x00FF))
+    state.zero = true;
+  else
+    state.zero = false;
 
-static void nop() {}
+  SIGNCALC(result);
+}
 
-static void ora() {}
+static void cpy() {
+  value = getvalue();
+  result = (uint16_t)state.y - value;
 
-static void pha() {}
+  if (state.y >= (uint8_t)(value & 0x00FF))
+    state.carry = true;
+  else
+    state.carry = false;
+  if (state.y == (uint8_t)(value & 0x00FF))
+    state.zero = true;
+  else
+    state.zero = false;
+  SIGNCALC(result);
+}
 
-static void php() {}
+static void dec() {
+  value = getvalue();
+  result = value - 1;
 
-static void pla() {}
+  ZEROCALC(result);
+  SIGNCALC(result);
 
-static void plp() {}
+  putvalue(result);
+}
 
-static void rla() {}
+static void dex() {
+  state.x--;
 
-static void rol() {}
+  ZEROCALC(state.x);
+  SIGNCALC(state.x);
+}
 
-static void ror() {}
+static void dey() {
+  state.y--;
 
-static void rra() {}
+  ZEROCALC(state.y);
+  SIGNCALC(state.y);
+}
 
-static void rti() {}
+static void eor() {
+  state.opcode_panalty_cycle = true;
+  value = getvalue();
+  result = (uint16_t)state.accumulator ^ value;
 
-static void rts() {}
+  ZEROCALC(result);
+  SIGNCALC(result);
 
-static void sax() {}
+  SAVEACCUM(result);
+}
 
-static void sbc() {}
+static void inc() {
+  value = getvalue();
+  result = value + 1;
 
-static void sec() {}
+  ZEROCALC(result);
+  SIGNCALC(result);
 
-static void sed() {}
+  putvalue(result);
+}
 
-static void sei() {}
+static void inx() {
+  state.x++;
 
-static void slo() {}
+  ZEROCALC(state.x);
+  SIGNCALC(state.x);
+}
 
-static void sre() {}
+static void iny() {
+  state.y++;
 
-static void sta() {}
+  ZEROCALC(state.y);
+  SIGNCALC(state.y);
+}
 
-static void stx() {}
+static void jmp() { state.program_counter = state.oprand_address; }
 
-static void sty() {}
+static void jsr() {
+  push16(state.program_counter - 1);
+  state.program_counter = state.oprand_address;
+}
 
-static void tax() {}
+static void lda() {
+  state.opcode_panalty_cycle = 1;
 
-static void tay() {}
+  value = getvalue();
+  state.accumulator = (uint8_t)(value & 0x00FF);
 
-static void tsx() {}
+  ZEROCALC(state.accumulator);
+  SIGNCALC(state.accumulator);
+}
 
-static void txa() {}
+static void ldx() {
+  state.opcode_panalty_cycle = 1;
+  value = getvalue();
+  state.x = (uint8_t)(value & 0x00FF);
 
-static void txs() {}
+  ZEROCALC(state.x);
+  SIGNCALC(state.x);
+}
 
-static void tya() {}
+static void ldy() {
+  state.opcode_panalty_cycle = 1;
+  value = getvalue();
+  state.y = (uint8_t)(value & 0x00FF);
+
+  ZEROCALC(state.y);
+  SIGNCALC(state.y);
+}
+
+static void lsr() {
+  value = getvalue();
+  result = value >> 1;
+
+  if (value & 1)
+    state.carry = true;
+  else
+    state.carry = false;
+  ZEROCALC(result);
+  SIGNCALC(result);
+
+  putvalue(result);
+}
+
+static void nop() {
+  switch (state.opcode) {
+  case 0x1C:
+  case 0x3C:
+  case 0x5C:
+  case 0x7C:
+  case 0xDC:
+  case 0xFC:
+    state.opcode_panalty_cycle = 1;
+    break;
+  }
+}
+
+static void ora() {
+  state.opcode_panalty_cycle = 1;
+  value = getvalue();
+  result = (uint16_t)state.accumulator | value;
+
+  ZEROCALC(result);
+  SIGNCALC(result);
+
+  SAVEACCUM(result);
+}
+
+static void pha() { push8(state.accumulator); }
+
+static void php() {
+  uint8_t status = state.processor_status | 0x10;
+  push8(status);
+}
+
+static void pla() {
+  state.accumulator = pull8();
+
+  ZEROCALC(state.accumulator);
+  SIGNCALC(state.accumulator);
+}
+
+static void plp() {
+  state.processor_status = pull8();
+  state.unused = true;
+}
+
+static void rol() {
+  value = getvalue();
+  result = (value << 1) | (state.carry);
+
+  CARRYCALC(result);
+  ZEROCALC(result);
+  SIGNCALC(result);
+
+  putvalue(result);
+}
+
+static void ror() {
+  value = getvalue();
+  result = (value >> 1) | ((state.carry) << 7);
+
+  if (value & 1)
+    state.carry = true;
+  else
+    state.carry = false;
+  ZEROCALC(result);
+  SIGNCALC(result);
+
+  putvalue(result);
+}
+
+static void rti() {
+  state.processor_status = pull8();
+  value = pull16();
+  state.program_counter = value;
+}
+
+static void rts() {
+  value = pull16();
+  state.program_counter = value + 1;
+}
+
+static void sbc() {
+  state.opcode_panalty_cycle = 1;
+  value = getvalue() ^ 0x00FF;
+  result = (uint16_t)state.accumulator + value + (uint16_t)(state.carry);
+
+  CARRYCALC(result);
+  ZEROCALC(result);
+  OVERFLOWCALC(result, state.accumulator, value);
+  SIGNCALC(result);
+
+#ifndef NES_CPU
+  if (state.decimal_mode) {
+    state.carry = false;
+
+    state.accumulator -= 0x66;
+    if ((state.accumulator & 0x0F) > 0x09) {
+      state.accumulator += 0x06;
+    }
+    if ((state.accumulator & 0xF0) > 0x90) {
+      state.accumulator += 0x60;
+      state.carry = true;
+    }
+
+    state.cycles++;
+  }
+#endif
+
+  SAVEACCUM(result);
+}
+
+static void sec() { state.carry = true; }
+
+static void sed() { state.decimal_mode = true; }
+
+static void sei() { state.interrupt_disable = true; }
+
+static void sta() { putvalue(state.accumulator); }
+
+static void stx() { putvalue(state.x); }
+
+static void sty() { putvalue(state.y); }
+
+static void tax() {
+  state.x = state.accumulator;
+
+  ZEROCALC(state.x);
+  SIGNCALC(state.x);
+}
+
+static void tay() {
+  state.y = state.accumulator;
+
+  ZEROCALC(state.y);
+  SIGNCALC(state.y);
+}
+
+static void tsx() {
+  state.x = state.stack_ptr;
+
+  ZEROCALC(state.x);
+  SIGNCALC(state.x);
+}
+
+static void txa() {
+  state.accumulator = state.x;
+
+  ZEROCALC(state.accumulator);
+  SIGNCALC(state.accumulator);
+}
+
+static void txs() { state.stack_ptr = state.x; }
+
+static void tya() {
+  state.accumulator = state.y;
+
+  ZEROCALC(state.accumulator);
+  SIGNCALC(state.accumulator);
+}
 
 // clang-format off
 static void (*addrtable[256])() = {
@@ -354,6 +768,16 @@ static void (*addrtable[256])() = {
 /* E */     imm, indx,  imm, indx,   zp,   zp,   zp,   zp,  imp,  imm,  imp,  imm, abso, abso, abso, abso, /* E */
 /* F */     rel, indy,  imp, indy,  zpx,  zpx,  zpx,  zpx,  imp, absy,  imp, absy, absx, absx, absx, absx  /* F */
 };
+
+// undocumented ops
+#define lax nop
+#define sax nop
+#define dcp nop
+#define isb nop
+#define slo nop
+#define rla nop
+#define sre nop
+#define rra nop
 
 static void (*optable[256])() = {
 /*        |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  |  A  |  B  |  C  |  D  |  E  |  F  |      */
