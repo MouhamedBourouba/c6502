@@ -1,9 +1,4 @@
-#include <cmath>
-#include <stdbool.h>
-#include <stdint.h>
-
-#define RESET_VECTOR_LOW 0xFFFA
-#define STACK_PAGE 0x0100
+#include "c6502.h"
 
 #define COMBINE_BYTES(low, high) (((uint16_t)high) << 8 | (uint16_t)low)
 
@@ -41,61 +36,52 @@
 
 #define SAVEACCUM(n) state.accumulator = (uint8_t)((n) & 0x00FF)
 
-// Forward decleration
-// The user of the libary the resposible for implementing those functions
-uint8_t read6502(uint16_t address);
-void write6502(uint16_t address, uint8_t value);
-
 static void (*addrtable[256])();
 static void (*optable[256])();
 static const uint32_t ticktable[256];
 
-static struct {
-  uint8_t stack_ptr;
-
-  uint16_t program_counter;
-
-  uint8_t accumulator, x, y;
-
-  union {
-    struct {
-      bool carry : 1;
-      bool zero : 1;
-      bool interrupt_disable : 1;
-      bool decimal_mode : 1;
-      bool breake : 1;
-      bool unused : 1;
-      bool overflow : 1;
-      bool negative : 1;
-    };
-    uint8_t processor_status;
-  };
-
-  uint8_t cycles;
-  uint8_t opcode;
-
-  uint16_t oprand_address;
-  uint16_t relative_address;
-
-  bool addr_panalty_cycle, opcode_panalty_cycle;
-
-  unsigned num_of_cyles;
-} state;
-
 void c6502_reset() {
   state.processor_status = 0;
+  state.unused = true;
 
   state.stack_ptr = 0xFD;
 
-  state.x = state.y = state.accumulator = 0;
-  state.cycles = state.oprand_address = 0;
+  state.x = 0;
+  state.y = 0;
+  state.accumulator = 0;
+  state.cycles = 0;
 
   uint8_t reset_vector_lo = read6502(RESET_VECTOR_LOW);
   uint8_t reset_vector_hi = read6502(RESET_VECTOR_LOW + 1);
 
   state.processor_status = COMBINE_BYTES(reset_vector_lo, reset_vector_hi);
-
   state.cycles = 8;
+
+  state.oprand_address = 0;
+}
+
+void c6502_tick() {
+  state.total_cycles++;
+
+  if (state.cycles == 0) {
+    state.toatal_instructions++;
+
+    state.opcode = read6502(state.program_counter++);
+    state.unused = true;
+
+    state.opcode_penalty_cycle = false;
+    state.addr_penalty_cycle = false;
+
+    (*addrtable[state.opcode])();
+    (*optable[state.opcode])();
+
+    state.cycles += ticktable[state.opcode];
+
+    if (state.addr_penalty_cycle && state.opcode_penalty_cycle)
+      state.cycles++;
+  } else {
+    state.cycles--;
+  }
 }
 
 bool c6502_getCarry() { return state.carry; }
@@ -106,7 +92,8 @@ bool c6502_getBreake() { return state.breake; }
 bool c6502_getOverflow() { return state.overflow; }
 bool c6502_getNegative() { return state.negative; }
 
-void c6502_tick() {}
+bool c6502_getTotaCylesRan() { return state.total_cycles; }
+bool c6502_getTotaInstructionsRan() { return state.toatal_instructions; }
 
 inline static uint16_t read_pc() { return state.program_counter++; }
 
@@ -158,7 +145,7 @@ static void absx() {
   state.oprand_address += state.x;
 
   if (state.oprand_address >> 8 != hi) {
-    state.addr_panalty_cycle = true;
+    state.addr_penalty_cycle = true;
   }
   return;
 }
@@ -171,7 +158,7 @@ static void absy() {
   state.oprand_address += state.y;
 
   if (state.oprand_address >> 8 != hi) {
-    state.addr_panalty_cycle = true;
+    state.addr_penalty_cycle = true;
   }
   return;
 }
@@ -213,7 +200,7 @@ static void indy() {
   state.oprand_address = target + state.y;
 
   if ((state.oprand_address & 0xFF00) != (target & 0xFF00)) {
-    state.addr_panalty_cycle = true;
+    state.addr_penalty_cycle = true;
   }
   return;
 }
@@ -263,7 +250,7 @@ uint8_t result;
 
 // Instructions
 static void adc() {
-  state.opcode_panalty_cycle = 1;
+  state.opcode_penalty_cycle = 1;
   value = getvalue();
   result = (uint16_t)state.accumulator + value + (uint16_t)(state.carry);
 
@@ -284,7 +271,7 @@ static void adc() {
       state.carry = true;
     }
 
-    state.num_of_cyles++;
+    state.cycles++;
   }
 #endif
 
@@ -293,7 +280,7 @@ static void adc() {
 }
 
 static void and () {
-  state.opcode_panalty_cycle = true;
+  state.opcode_penalty_cycle = true;
 
   value = getvalue();
   result = (uint16_t)(state.accumulator) & value;
@@ -435,7 +422,7 @@ static void cli() { state.interrupt_disable = false; }
 static void clv() { state.overflow = false; }
 
 static void cmp() {
-  state.opcode_panalty_cycle = true;
+  state.opcode_penalty_cycle = true;
   value = getvalue();
   result = (uint16_t)state.accumulator - value;
 
@@ -507,7 +494,7 @@ static void dey() {
 }
 
 static void eor() {
-  state.opcode_panalty_cycle = true;
+  state.opcode_penalty_cycle = true;
   value = getvalue();
   result = (uint16_t)state.accumulator ^ value;
 
@@ -549,7 +536,7 @@ static void jsr() {
 }
 
 static void lda() {
-  state.opcode_panalty_cycle = 1;
+  state.opcode_penalty_cycle = 1;
 
   value = getvalue();
   state.accumulator = (uint8_t)(value & 0x00FF);
@@ -559,7 +546,7 @@ static void lda() {
 }
 
 static void ldx() {
-  state.opcode_panalty_cycle = 1;
+  state.opcode_penalty_cycle = 1;
   value = getvalue();
   state.x = (uint8_t)(value & 0x00FF);
 
@@ -568,7 +555,7 @@ static void ldx() {
 }
 
 static void ldy() {
-  state.opcode_panalty_cycle = 1;
+  state.opcode_penalty_cycle = 1;
   value = getvalue();
   state.y = (uint8_t)(value & 0x00FF);
 
@@ -598,13 +585,13 @@ static void nop() {
   case 0x7C:
   case 0xDC:
   case 0xFC:
-    state.opcode_panalty_cycle = 1;
+    state.opcode_penalty_cycle = 1;
     break;
   }
 }
 
 static void ora() {
-  state.opcode_panalty_cycle = 1;
+  state.opcode_penalty_cycle = 1;
   value = getvalue();
   result = (uint16_t)state.accumulator | value;
 
@@ -670,7 +657,7 @@ static void rts() {
 }
 
 static void sbc() {
-  state.opcode_panalty_cycle = 1;
+  state.opcode_penalty_cycle = 1;
   value = getvalue() ^ 0x00FF;
   result = (uint16_t)state.accumulator + value + (uint16_t)(state.carry);
 
