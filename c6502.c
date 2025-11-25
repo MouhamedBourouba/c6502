@@ -54,7 +54,7 @@ void c6502_reset() {
   uint8_t reset_vector_lo = read6502(RESET_VECTOR_LOW);
   uint8_t reset_vector_hi = read6502(RESET_VECTOR_LOW + 1);
 
-  state.processor_status = COMBINE_BYTES(reset_vector_lo, reset_vector_hi);
+  state.program_counter = COMBINE_BYTES(reset_vector_lo, reset_vector_hi);
   state.cycles = 8;
 
   state.oprand_address = 0;
@@ -279,7 +279,7 @@ static void adc() {
   return;
 }
 
-static void and () {
+static void and() {
   state.opcode_penalty_cycle = true;
 
   value = getvalue();

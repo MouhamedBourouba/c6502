@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define RESET_VECTOR_LOW 0xFFFA
+#define RESET_VECTOR_LOW 0xFFFC
 #define STACK_PAGE 0x0100
 
 static struct {
